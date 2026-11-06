@@ -2,7 +2,7 @@
 
 Pruebas de rendimiento (smoke, carga, stress, spike y soak) del circuito **Generar Asiento → Crear Asiento** de Holistor, con Locust.
 
-El diseño completo y el plan por fases están en [PLAN_PRUEBAS_STRESS.md](PLAN_PRUEBAS_STRESS.md).
+El diseño completo y el plan por fases están en [PLAN_PRUEBAS_STRESS.md](PLAN_PRUEBAS_STRESS.md). Cómo funciona por dentro y dónde se llama a cada servicio de la API: [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
 
 > **Estado:** Fase 3 (GDC de punta a punta).
 > - Fase 1: configuración multi-ambiente, validación de `users.csv`, pool exclusivo y guardia de producción.
