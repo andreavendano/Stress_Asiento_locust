@@ -1,0 +1,14 @@
+# Entorno
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secretos y datos sensibles (NUNCA versionar)
+.env
+data/**/users.csv
+
+# Salida de las corridas
+reports/

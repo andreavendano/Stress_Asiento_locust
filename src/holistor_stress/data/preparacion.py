@@ -1,0 +1,68 @@
+"""Orquesta carga + filtros + validaciones. Lo usan el bootstrap de Locust y la CLI de verificación."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+
+from holistor_stress.config.settings import Settings
+from holistor_stress.data import validaciones as v
+from holistor_stress.data.fila import FilaCarga
+from holistor_stress.data.filtros import aplicar_filtro, parsear_filtro
+from holistor_stress.data.users_loader import DatosInvalidosError, cargar_filas
+
+
+@dataclass
+class DatosPreparados:
+    filas: list[FilaCarga]
+    inactivas: int = 0
+    excluidas_por_modulo: int = 0
+    excluidas_por_filtro: int = 0
+    advertencias: list[str] = field(default_factory=list)
+
+
+def preparar_datos(
+    settings: Settings,
+    filtro: str | None = None,
+    usuarios_pedidos: int | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> DatosPreparados:
+    environ = os.environ if environ is None else environ
+    var_clave = settings.datos.clave_env_var
+    clave_defecto = environ.get(var_clave) if var_clave else None
+
+    carga = cargar_filas(settings.ruta(settings.datos.users_csv), clave_defecto, var_clave)
+    advertencias = list(carga.advertencias)
+
+    habilitadas = [f for f in carga.filas if settings.modulos.habilitado(f.modulo)]
+    excluidas_modulo = len(carga.filas) - len(habilitadas)
+    if excluidas_modulo:
+        deshabilitados = sorted({f.modulo for f in carga.filas} - {f.modulo for f in habilitadas})
+        advertencias.append(
+            f"{excluidas_modulo} filas excluidas: módulo deshabilitado en el ambiente ({', '.join(deshabilitados)})"
+        )
+
+    try:
+        filas = aplicar_filtro(habilitadas, parsear_filtro(filtro))
+    except ValueError as e:
+        raise DatosInvalidosError([f"--filtro-filas: {e}"]) from e
+
+    errores = [
+        *v.validar_usuarios_unicos(filas),
+        *v.validar_solapamientos(filas),
+        *v.validar_plantillas_syj(filas, settings.ruta(settings.datos.plantillas_syj)),
+    ]
+    if not filas:
+        errores.append("no quedan filas activas para ejecutar (revisar activo, módulos habilitados y filtro)")
+    errores += v.validar_capacidad(filas, usuarios_pedidos)
+    if errores:
+        raise DatosInvalidosError(errores)
+
+    return DatosPreparados(
+        filas=filas,
+        inactivas=carga.inactivas,
+        excluidas_por_modulo=excluidas_modulo,
+        excluidas_por_filtro=len(habilitadas) - len(filas),
+        advertencias=advertencias,
+    )

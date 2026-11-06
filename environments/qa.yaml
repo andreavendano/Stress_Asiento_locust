@@ -1,0 +1,56 @@
+# Ambiente QA. Sin secretos: las claves van en variables de entorno (.env / CI).
+# Cualquier valor se puede sobrescribir con HOLISTOR__<seccion>__<clave>=valor.
+nombre: qa
+base_url: "https://gestor-comprobantes-back.azurewebsites.net"
+es_produccion: false
+urls_produccion: []             # cuando exista producción, cargar su URL acá: la guardia bloquea correr contra ella
+idioma: es                      # header Accept-Language
+enviar_tenant_name: false       # header x-tenant-name (separa la cola de Crear Asiento)
+timeout_request_s: 300          # 5 min: generar-asiento-comprobantes con lotes grandes supera 60 s (GDC8, 15.404 cpbtes)
+
+datos:
+  users_csv: "data/qa/users.csv"
+  plantillas_syj: "data/plantillas/syj"
+  clave_env_var: "HOLISTOR_QA_CLAVE"   # se usa si la columna clave viene vacía
+  volumen_csv: "data/qa/volumen_comprobantes.csv"   # comprobantes por empresa/mes (holistor-stress-volumen)
+
+modulos:
+  gdc: { habilitado: true }
+  syj: { habilitado: false }    # requiere EmpMod, nuc_EjerEco y nuc_TipoAsiento (doc del dev)
+
+flujo:
+  contexto: una_vez             # una_vez | cada_iteracion
+  precheck: primer_mes         # off | primer_mes | completo (todo el rango: respuesta pesada, ~2,8 KB por comprobante)
+  seguimiento: progreso         # progreso | jobs_estado
+  verificar_control: true
+  verificar_fechas: true
+  polling: { intervalo_s: 3, timeout_s: 600 }
+  relogin_401_max: 1
+  setup_reintentos_max: 3       # fallas transitorias seguidas al preparar el contexto antes de detener el usuario virtual
+  periodo_fiscal_id_defecto: 1  # si GetPeriodosFiscales no lo encuentra (como la colección); null = fallar
+
+wait_time: { min_s: 5, max_s: 15 }
+
+# Valores PROVISORIOS: a acordar con producto y desarrollo.
+thresholds:
+  error_rate_max: 0.0
+  p95_ms:
+    "[Auth] Authenticate": 3000
+    "[GDC] generar-asiento-comprobantes": 10000
+  e2e_p95_s:
+    "[E2E] GDC encolado→Finalizado": 120
+
+# Verificación en la base del tenant al terminar cada corrida (solo SELECT).
+# Servidor, base, usuario y clave: HOLISTOR_QA_DB_SERVIDOR / _BASE / _USUARIO / _CLAVE en .env.
+bd:
+  habilitada: true
+  prefijo_env: "HOLISTOR_QA_DB_"
+  driver: "ODBC Driver 18 for SQL Server"
+  trust_server_certificate: false
+  timeout_s: 30
+  verificar_al_terminar: true
+  # Prueba multitenant: cada trabajo se verifica en la base de su tenant
+  bases_por_tenant:
+    866: "z_qa_GDCpruebasQA6_erp"
+    867: "z_qa_GDCpruebasQA7_erp"
+    868: "z_qa_GDCpruebasQA8_erp"

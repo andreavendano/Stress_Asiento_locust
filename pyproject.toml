@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "holistor-stress"
+version = "0.1.0"
+description = "Pruebas de stress con Locust del circuito Generar Asiento → Crear Asiento (Holistor)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "locust>=2.47,<3",
+    "pydantic>=2.14,<3",
+    "PyYAML>=6.0,<7",
+    "python-dotenv>=1.2,<2",
+]
+
+[project.optional-dependencies]
+bd = [
+    "pyodbc>=5,<6",  # verificación en la base (holistor-stress-verificar)
+]
+dev = [
+    "pytest>=9.2,<10",
+    "ruff>=0.17,<1",
+]
+
+[project.scripts]
+holistor-stress-check = "holistor_stress.cli:main"
+holistor-stress-informe = "holistor_stress.reporting.informe:main"
+holistor-stress-volumen = "holistor_stress.data.volumen:main"
+holistor-stress-verificar = "holistor_stress.bd.verificacion:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Plantillas HTML/CSS/JS y SVG en línea: partirlas no mejora la lectura.
+"src/holistor_stress/reporting/html.py" = ["E501"]
+"src/holistor_stress/reporting/sql_verificacion.py" = ["E501"]
+"src/holistor_stress/reporting/resumen.py" = ["E501"]
+"src/holistor_stress/reporting/analisis.py" = ["E501"]
