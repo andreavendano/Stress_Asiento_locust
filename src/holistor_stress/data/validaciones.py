@@ -77,3 +77,29 @@ def validar_capacidad(filas: list[FilaCarga], usuarios_pedidos: int | None) -> l
         f"hay {len(filas)} filas activas y se pidieron {usuarios_pedidos} usuarios: cada usuario virtual "
         "necesita un usuario propio (sesión única). Agregar filas o bajar --users."
     ]
+
+
+def validar_empresa_unica_importacion(filas: list[FilaCarga]) -> list[str]:
+    """El backend permite UNA importación a la vez por empresa: cada fila IMPO necesita su propia empresa."""
+    por_empresa: dict[tuple[int, int], list[str]] = defaultdict(list)
+    for f in filas:
+        if f.modulo == "IMPO":
+            por_empresa[(f.tenant_id, f.empresa)].append(f.id)
+    return [
+        f"las filas {', '.join(ids)} importan en la misma empresa {empresa} del tenant {tenant}: el backend "
+        "permite una sola importación a la vez por empresa. Usar una empresa distinta por fila."
+        for (tenant, empresa), ids in por_empresa.items()
+        if len(ids) > 1
+    ]
+
+
+def validar_login_plataforma(filas: list[FilaCarga], hay_plataforma: bool) -> list[str]:
+    """Las filas con login=plataforma necesitan la sección `plataforma:` del ambiente (hosts del login)."""
+    ids = [f.id for f in filas if f.login == "plataforma"]
+    if hay_plataforma or not ids:
+        return []
+    muestra = ", ".join(ids[:5]) + (" …" if len(ids) > 5 else "")
+    return [
+        f"las filas {muestra} usan login=plataforma y el ambiente no tiene la sección 'plataforma:' "
+        "(host_url, portal_url, front_url)"
+    ]

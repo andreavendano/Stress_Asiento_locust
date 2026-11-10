@@ -68,6 +68,9 @@ class ContextoAsiento:
     periodo: PeriodoResuelto | None = None
     origen: OrigenResuelto | None = None
     registros_precheck: int | None = None  # None = todavía no se ejecutó el precheck
+    # Solo con login=plataforma: header Abp.TenantId de cada request y userId del login.
+    abp_tenant_id: int | None = None
+    user_id: str | None = None
 
     @property
     def etiqueta(self) -> str:

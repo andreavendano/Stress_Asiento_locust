@@ -2,6 +2,22 @@
 
 Pruebas de rendimiento (smoke, carga, stress, spike y soak) del circuito **Generar Asiento → Crear Asiento** de Holistor, con Locust.
 
+También incluye los escenarios de **comprobantes** de Gestor de Comprobantes, migrados del proyecto `stress_test` para
+tener un solo repositorio:
+
+| Locustfile | Escenario | Filas de `users.csv` | Detalle |
+|---|---|---|---|
+| `asiento_gdc.py` / `smoke_contexto.py` | Generar Asiento → Crear Asiento | `modulo=GDC` | este README |
+| `importacion_compras.py` | Importación de comprobantes de compra (CSV Portal IVA) | `modulo=IMPO` | [docs/ESCENARIO_IMPORTACION.md](docs/ESCENARIO_IMPORTACION.md) |
+| `modificacion_masiva.py` | Modificación masiva de cabecera (Cond. fiscal / Provincia) | `modulo=MODIF` | [docs/ESCENARIO_MODIFICACION_MASIVA.md](docs/ESCENARIO_MODIFICACION_MASIVA.md) |
+| `comprobante_compra_lite.py` / `comprobante_compra_completo.py` | Crear comprobante de compra (7 o 113 pasos) | `modulo=CPBTE` | [docs/ESCENARIO_CREAR_COMPROBANTE.md](docs/ESCENARIO_CREAR_COMPROBANTE.md) |
+| `sondeo_importacion.py` | Diagnóstico de "importación en curso" (no importa) | `modulo=IMPO` | [docs/ESCENARIO_IMPORTACION.md](docs/ESCENARIO_IMPORTACION.md#diagnóstico-sondeo-de-importación-en-curso) |
+
+Cada locustfile toma **solo las filas de su módulo**, así un mismo `users.csv` sirve para todos los escenarios (un
+mismo usuario puede aparecer en varios módulos, porque se corre un escenario a la vez). Las filas de comprobantes usan
+un único mes y, en general, `login=plataforma` + `tenancy` (login de la plataforma SaaS con las cuentas `admin` de cada
+tenant, como en `stress_test`). Equivalencias con el proyecto anterior: [Migración desde stress_test](#migración-desde-stress_test).
+
 El diseño completo y el plan por fases están en [PLAN_PRUEBAS_STRESS.md](PLAN_PRUEBAS_STRESS.md). Cómo funciona por dentro y dónde se llama a cada servicio de la API: [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
 
 > **Estado:** Fase 3 (GDC de punta a punta).
@@ -73,6 +89,17 @@ pip install -e ".[dev,bd]"
    - También se puede definir como variable del sistema o como secreto del CI.
 
 `users.csv` usa las mismas columnas que `filas_performance.csv` de la colección de Postman. Cada fila es **un usuario virtual exclusivo**, porque la aplicación permite una sola sesión por usuario.
+
+Columnas agregadas para los escenarios de comprobantes (opcionales; vacías = comportamiento original):
+
+| Columna | Valores | Uso |
+|---|---|---|
+| `modulo` | además de `GDC`/`SYJ`: `IMPO`, `MODIF`, `CPBTE` | Cada locustfile toma solo las filas de su módulo |
+| `login` | `gdc` (por defecto) o `plataforma` | `gdc`: Account/Authenticate del back de GDC (email + tenantId). `plataforma`: IsTenantAvailable + TokenAuth/Authenticate de la plataforma SaaS, con el header `Abp.TenantId` en cada request |
+| `tenancy` | nombre del tenant (`GDCpruebasQA7`) | Obligatorio con `login=plataforma`; tiene que corresponder al `tenantId` de la fila |
+
+> Las cuentas `admin` de cada tenant no usan la clave de `HOLISTOR_QA_CLAVE` (la de los usuarios GDC1…GDC20):
+> completar su columna `clave` en `users.csv` (que no se versiona).
 
 ## Verificar configuración y datos (sin generar carga)
 
@@ -251,16 +278,48 @@ src/holistor_stress/
   data/     FilaCarga, período, lectura de users.csv, validaciones y filtros
   core/     pool exclusivo, guardia de producción, runtime, bootstrap de Locust, run_id,
             HolistorUser (base_user), contexto, errores y métricas propias
-  api/      una función por servicio (rutas.py centraliza URLs y nombres "[Grupo] servicio")
+  api/      una función por servicio (rutas.py centraliza URLs y nombres "[Grupo] servicio");
+            comprobantes, maestros e importacion: servicios de los escenarios de comprobantes
   flows/    sesion (login + re-login 401), seleccion (reglas puras + pasos), gdc (precheck + generar),
-            contexto, seguimiento (cola), verificacion, trabajo_gdc (un trabajo de punta a punta)
-  tasks/    TaskSets: contexto_tasks (reabrir la pantalla), asiento_tasks (generar asiento GDC)
-  users/    usuarios virtuales concretos (SmokeContextoUser, AsientoGdcUser)
-  reporting/ trabajos (trabajos.csv + control de IDs), salida (CSV, log, historial), resumen (md/json),
-             html (reporte.html e index.html), informe (holistor-stress-informe)
+            contexto, seguimiento (cola), verificacion, trabajo_gdc (un trabajo de punta a punta);
+            maestros, ciclo, importacion, modificacion, comprobante (+ pasos_comprobante_completo)
+  tasks/    TaskSets: contexto_tasks (reabrir la pantalla), asiento_tasks (generar asiento GDC),
+            comprobantes_tasks (un ciclo de un escenario de comprobantes)
+  users/    usuarios virtuales concretos (SmokeContextoUser, AsientoGdcUser, comprobantes_users)
+  reporting/ trabajos (trabajos.csv + control de IDs), ciclos (ciclos.csv), salida (CSV, log, historial),
+             resumen (md/json), html (reporte.html e index.html), informe (holistor-stress-informe)
   cli.py    holistor-stress-check
-locustfiles/    entrypoints (solo imports): smoke_contexto.py, asiento_gdc.py
+locustfiles/    entrypoints (solo imports): smoke_contexto.py, asiento_gdc.py, importacion_compras.py,
+                modificacion_masiva.py, comprobante_compra_lite.py, comprobante_compra_completo.py,
+                sondeo_importacion.py
 environments/   un YAML por ambiente (sin secretos)
-data/           users.example.csv por ambiente y plantillas SYJ
-tests/          tests unitarios (sin servidor) + servidor_simulado.py
+data/           users.example.csv por ambiente, plantillas SYJ y plantilla del CSV de importación
+tests/          tests unitarios (sin servidor) + servidor_simulado.py + servidor_comprobantes.py
+tools/          utilidades sueltas: har_to_locust, blazemeter_json_to_locust, lote de 20.000 comprobantes
 ```
+
+## Migración desde stress_test
+
+| Antes (`stress_test`) | Ahora |
+|---|---|
+| `locust -f main.py` + `SCENARIO=<escenario>` en `.env` | Un locustfile por escenario (`locustfiles/…`) |
+| `SCENARIO=gdc_importacion_lite` / `_loop` | `importacion_compras.py` con `--trabajos-por-usuario 1` / sin cuota |
+| `SCENARIO=gdc_modificacion_masiva` / `_loop` | `modificacion_masiva.py` (ídem) |
+| `SCENARIO=gdc_nuevo_lite` / `_loop` | `comprobante_compra_lite.py` (ídem) |
+| `SCENARIO=gdc_nuevo` / `_loop` | `comprobante_compra_completo.py` (ídem) |
+| `scripts/sondeo_estado_empresa.py` | `locustfiles/sondeo_importacion.py` |
+| `scripts/har_to_locust.py`, `blazemeter_json_to_locust.py`, `generar_lote_20k.py`, `importar_definitivo_20k.py` | `tools/` (ver [tools/README.md](tools/README.md)) |
+| `accounts/accounts_<ENV>.csv` (tenancy, username, password, tenant_id, emp_codigo, periodo_cod) | Filas de `data/qa/users.csv`: `tenancy`, `usuario`, `clave`, `tenantId`, `empresa`, `periodo`, `login=plataforma` |
+| `TARGET_EMP_CODIGO` / `TARGET_PERIODO_COD` | Columnas `empresa` / `periodo` de cada fila |
+| `IMPO_*` / `MODIF_*` | Secciones `importacion:` / `modificacion:` del YAML (o `HOLISTOR__IMPORTACION__LOTE_N=…`) |
+| `TARGET_ENV` + `config/env_config.py` (hosts por ambiente) | `--target-env` + `base_url` y sección `plataforma:` del YAML |
+| `CACHE_LOOKUPS` | `maestros.cache` |
+| `API_TIMEOUT`, `IMPO_TIMEOUT_REQUEST_SEG`… | `timeout_request_s` |
+| `WAIT_MIN` / `WAIT_MAX` (o `between(1, 3)` fijo) | `wait_time.min_s` / `max_s` (QA: 5–15 s; para el ritmo anterior, `HOLISTOR__WAIT_TIME__MIN_S=1` y `HOLISTOR__WAIT_TIME__MAX_S=3`) |
+| `LOAD_SHAPE=steps` + `LOAD_STEPS` (`shapes.py`) | Igual, en los locustfiles de comprobantes (`core/shapes.py`) |
+| `RELOGIN_ON_401`, `LOGIN_MAX_FAILS` | `flujo.relogin_401_max`, `flujo.setup_reintentos_max` |
+| `reports/run_<fecha>.html` + CSV | `reports/<run_id>_<escenario>_<N>u/` (`reporte.html`, `ciclos.csv`, `run.log`…) |
+
+Lo que no se migró: `run_headless.ps1` (los comandos de Locust ya dejan todo en la carpeta de la corrida), el modo
+distribuido con `WORKER_INDEX`/`WORKER_COUNT`, los umbrales `MAX_FAIL_RATIO` / `MAX_P95_MS` / `MAX_AVG_MS` (acá están
+`thresholds:` del YAML) y las grabaciones `har_input/*.json` (tienen tokens y una clave; quedan fuera del repo).

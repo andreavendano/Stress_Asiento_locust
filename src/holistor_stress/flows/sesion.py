@@ -19,8 +19,17 @@ N_INVALIDADA = "[Sesión] sesión invalidada"
 
 
 def iniciar_sesion(user: UsuarioApi) -> None:
-    """Login con la fila; deja el token en el contexto. Si falla, el contexto queda sin token."""
+    """Login con la fila; deja el token en el contexto. Si falla, el contexto queda sin token.
+
+    `login=gdc` (por defecto): Account/Authenticate del back de GDC. `login=plataforma`: login de la
+    plataforma SaaS, que además deja el tenant (header Abp.TenantId) y el userId en el contexto.
+    """
     user.ctx.token = None
+    if user.ctx.fila.login == "plataforma":
+        token, tenant_id, user_id = auth.authenticate_plataforma(user)
+        user.ctx.abp_tenant_id, user.ctx.user_id = tenant_id, user_id
+        user.ctx.token = token
+        return
     user.ctx.token = auth.authenticate(user)
 
 
