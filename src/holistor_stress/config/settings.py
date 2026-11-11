@@ -31,6 +31,10 @@ class Modulo(_Base):
 class Modulos(_Base):
     gdc: Modulo = Modulo(habilitado=True)
     syj: Modulo = Modulo(habilitado=False)
+    # Escenarios de comprobantes (cada locustfile toma solo las filas de su módulo).
+    impo: Modulo = Modulo(habilitado=True)  # importación de comprobantes de compra
+    modif: Modulo = Modulo(habilitado=True)  # modificación masiva de cabecera
+    cpbte: Modulo = Modulo(habilitado=True)  # crear comprobante de compra (lite y completo)
 
     def habilitado(self, modulo: str) -> bool:
         return getattr(self, modulo.lower()).habilitado
@@ -83,6 +87,78 @@ class BaseDatos(_Base):
     bases_por_tenant: dict[int, str] = {}
 
 
+def _sin_barra(v: str) -> str:
+    v = v.strip().rstrip("/")
+    if not v.startswith(("http://", "https://")):
+        raise ValueError(f"debe empezar con http:// o https:// (valor: {v!r})")
+    return v
+
+
+class Plataforma(_Base):
+    """Hosts de la plataforma SaaS. Los usan las filas con `login=plataforma` y los escenarios que navegan.
+
+    - `host_url`: login ABP (IsTenantAvailable + TokenAuth/Authenticate) y servicios de la plataforma.
+    - `portal_url`: portal (Origin/Referer del login y páginas del portal).
+    - `front_url`: front de Gestor de Comprobantes (stream de la importación y páginas del dashboard).
+    """
+
+    host_url: str
+    portal_url: str
+    front_url: str
+
+    @field_validator("host_url", "portal_url", "front_url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        return _sin_barra(v)
+
+
+class Importacion(_Base):
+    """Datos de prueba del escenario de importación (antes IMPO_* del .env). Sin valores fijos en el código:
+    los de negocio son obligatorios si se corre el escenario."""
+
+    origen_codigo: str  # código del origen de importación (PIC = Portal IVA); el id se busca en la API
+    tipo_comprobante: str  # código ARCA del tipo de comprobante del CSV (11 = Factura C)
+    moneda: str  # PES
+    tipo_cambio: float = Field(gt=0)
+    importe_min: float = Field(gt=0)
+    importe_max: float = Field(gt=0)
+    lote_n: int = Field(28, gt=0)  # comprobantes por archivo
+    espera_empresa_libre_s: float = Field(600, gt=0)
+    timeout_proceso_archivo_s: float = Field(3600, gt=0)
+    timeout_job_s: float = Field(3600, gt=0)
+    intervalo_sondeo_s: float = Field(5, gt=0)
+    # GetListComprobantes rechaza limit > 100 ("limit must not be greater than 100").
+    tam_pagina: int = Field(100, ge=1, le=100)
+    plantilla: str = "data/plantillas/importacion/plantilla_importacion_compras_oficial.csv"
+
+    @model_validator(mode="after")
+    def _rango(self) -> Importacion:
+        if self.importe_max < self.importe_min:
+            raise ValueError(
+                f"importe_max ({self.importe_max}) no puede ser menor que importe_min ({self.importe_min})"
+            )
+        return self
+
+
+class Modificacion(_Base):
+    """Escenario de modificación masiva de cabecera (antes MODIF_* del .env)."""
+
+    # lote: `lote_n` comprobantes de una página al azar. todos: todo el período (ccpraIds=[] + isExclude=true).
+    seleccion: Literal["lote", "todos"] = "lote"
+    lote_n: int = Field(50, ge=1, le=100)
+    # Cada ciclo usa el primer código DISTINTO del valor actual (siempre hay un cambio real).
+    cond_fiscal: list[int] = Field(default_factory=lambda: [4, 1], min_length=1)
+    provincia: list[int] = Field(default_factory=lambda: [18, 1], min_length=1)
+
+
+class Maestros(_Base):
+    """Datos maestros de los escenarios de comprobantes (empresa, período, proveedor, tipos de movimiento)."""
+
+    # El primer usuario virtual de cada tenant/empresa/período hace los lookups y el resto los reutiliza
+    # (antes CACHE_LOOKUPS): sin cache, con cientos de usuarios la rampa mide los lookups y no el escenario.
+    cache: bool = True
+
+
 class Thresholds(_Base):
     error_rate_max: float = Field(0.0, ge=0, le=1)
     p95_ms: dict[str, float] = {}
@@ -103,6 +179,10 @@ class Settings(_Base):
     wait_time: WaitTime = WaitTime()
     thresholds: Thresholds = Thresholds()
     bd: BaseDatos = BaseDatos()
+    plataforma: Plataforma | None = None
+    maestros: Maestros = Maestros()
+    importacion: Importacion | None = None
+    modificacion: Modificacion = Modificacion()
 
     # Carpeta raíz del proyecto; la completa el loader (no va en el YAML).
     raiz: Path

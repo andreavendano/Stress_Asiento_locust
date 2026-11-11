@@ -6,7 +6,7 @@ Es independiente de Locust para poder usarlo también desde la CLI de verificaci
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,7 @@ from holistor_stress.core.pool import PoolExclusivo
 from holistor_stress.core.run_info import RunInfo, nueva_corrida
 from holistor_stress.data.preparacion import DatosPreparados, preparar_datos
 from holistor_stress.data.volumen import Volumen
+from holistor_stress.reporting.ciclos import RegistroCiclos
 from holistor_stress.reporting.trabajos import RegistroTrabajos
 
 
@@ -31,6 +32,7 @@ class HolistorRuntime:
     trabajos_por_usuario: int = 0  # 0 = sin límite (hasta que termine la prueba)
     carpeta_reportes: Path | None = None
     trabajos: RegistroTrabajos | None = None
+    ciclos: Any = None  # reporting.ciclos.RegistroCiclos (ciclos.csv de los escenarios de comprobantes)
     usuarios_terminados: int = 0  # usuarios virtuales que completaron su cuota de trabajos
     muestreador: Any = None  # reporting.salida.Muestreador (historial.csv)
     volumen: Volumen | None = None  # comprobantes por empresa/mes (datos.volumen_csv)
@@ -49,6 +51,7 @@ class HolistorRuntime:
         (carpeta / "run_info.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
         self.carpeta_reportes = carpeta
         self.trabajos = RegistroTrabajos(carpeta / "trabajos.csv")
+        self.ciclos = RegistroCiclos(carpeta / "ciclos.csv")
 
     @property
     def base_url(self) -> str:
@@ -63,13 +66,22 @@ def preparar_runtime(
     permitir_produccion: bool = False,
     raiz: Path | None = None,
     environ: Mapping[str, str] | None = None,
+    modulos: Iterable[str] | None = None,
 ) -> HolistorRuntime:
-    """Lanza ConfigError, DatosInvalidosError o GuardiaProduccionError con mensajes listos para mostrar."""
+    """Lanza ConfigError, DatosInvalidosError o GuardiaProduccionError con mensajes listos para mostrar.
+
+    `modulos`: solo las filas de esos módulos de users.csv (los que usa el locustfile). None = todas.
+    """
     overrides = {"base_url": host} if host else None
     settings = cargar_settings(ambiente, raiz=raiz, environ=environ, overrides=overrides)
     # La guardia va antes que los datos: no tiene sentido validar un CSV para un destino prohibido.
     verificar_ambiente(settings, permitir_produccion=permitir_produccion)
-    datos = preparar_datos(settings, filtro=filtro, usuarios_pedidos=usuarios_pedidos, environ=environ)
+    if settings.plataforma is not None:  # el login por plataforma y la navegación también tocan estos hosts
+        for url in (settings.plataforma.host_url, settings.plataforma.front_url):
+            verificar_ambiente(settings, url_efectiva=url, permitir_produccion=permitir_produccion)
+    datos = preparar_datos(
+        settings, filtro=filtro, usuarios_pedidos=usuarios_pedidos, environ=environ, modulos=modulos
+    )
     return HolistorRuntime(
         settings=settings,
         datos=datos,
@@ -109,6 +121,8 @@ def resumen(rt: HolistorRuntime) -> list[str]:
     ]
     if rt.datos.inactivas:
         lineas.append(f"Filas inactivas (activo=false): {rt.datos.inactivas}")
+    if rt.datos.excluidas_por_escenario:
+        lineas.append(f"Filas de otros módulos (no las usa este escenario): {rt.datos.excluidas_por_escenario}")
     if rt.datos.excluidas_por_filtro:
         lineas.append(f"Filas excluidas por --filtro-filas: {rt.datos.excluidas_por_filtro}")
     lineas += [f"ADVERTENCIA: {a}" for a in rt.datos.advertencias]

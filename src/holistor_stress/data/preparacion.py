@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from holistor_stress.config.settings import Settings
@@ -18,6 +19,7 @@ class DatosPreparados:
     filas: list[FilaCarga]
     inactivas: int = 0
     excluidas_por_modulo: int = 0
+    excluidas_por_escenario: int = 0  # filas de otros módulos que este locustfile no usa
     excluidas_por_filtro: int = 0
     advertencias: list[str] = field(default_factory=list)
 
@@ -27,7 +29,9 @@ def preparar_datos(
     filtro: str | None = None,
     usuarios_pedidos: int | None = None,
     environ: Mapping[str, str] | None = None,
+    modulos: Iterable[str] | None = None,
 ) -> DatosPreparados:
+    """`modulos`: solo las filas de esos módulos (cada locustfile declara los suyos). None = todas."""
     environ = os.environ if environ is None else environ
     var_clave = settings.datos.clave_env_var
     clave_defecto = environ.get(var_clave) if var_clave else None
@@ -43,15 +47,30 @@ def preparar_datos(
             f"{excluidas_modulo} filas excluidas: módulo deshabilitado en el ambiente ({', '.join(deshabilitados)})"
         )
 
+    del_escenario = habilitadas
+    if modulos is not None:
+        modulos = {m.upper() for m in modulos}
+        del_escenario = [f for f in habilitadas if f.modulo in modulos]
+
     try:
-        filas = aplicar_filtro(habilitadas, parsear_filtro(filtro))
+        filas = aplicar_filtro(del_escenario, parsear_filtro(filtro))
     except ValueError as e:
         raise DatosInvalidosError([f"--filtro-filas: {e}"]) from e
 
+    # Sesión única: en una corrida no se puede repetir un usuario. Sin escenario (CLI de verificación) se
+    # valida por módulo, porque cada módulo se corre con su propio locustfile.
+    grupos: list[list[FilaCarga]] = [filas]
+    if modulos is None:
+        por_modulo: dict[str, list[FilaCarga]] = defaultdict(list)
+        for f in filas:
+            por_modulo[f.modulo].append(f)
+        grupos = list(por_modulo.values())
     errores = [
-        *v.validar_usuarios_unicos(filas),
+        *(e for g in grupos for e in v.validar_usuarios_unicos(g)),
         *v.validar_solapamientos(filas),
         *v.validar_plantillas_syj(filas, settings.ruta(settings.datos.plantillas_syj)),
+        *v.validar_empresa_unica_importacion(filas),
+        *v.validar_login_plataforma(filas, settings.plataforma is not None),
     ]
     if not filas:
         errores.append("no quedan filas activas para ejecutar (revisar activo, módulos habilitados y filtro)")
@@ -63,6 +82,7 @@ def preparar_datos(
         filas=filas,
         inactivas=carga.inactivas,
         excluidas_por_modulo=excluidas_modulo,
-        excluidas_por_filtro=len(habilitadas) - len(filas),
+        excluidas_por_escenario=len(habilitadas) - len(del_escenario),
+        excluidas_por_filtro=len(del_escenario) - len(filas),
         advertencias=advertencias,
     )

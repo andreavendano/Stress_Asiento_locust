@@ -1,4 +1,11 @@
-"""Una fila de users.csv = un trabajo = un usuario virtual (mismo esquema que filas_performance.csv)."""
+"""Una fila de users.csv = un trabajo = un usuario virtual (mismo esquema que filas_performance.csv).
+
+Módulos:
+- GDC / SYJ: Generar Asiento → Crear Asiento.
+- IMPO: importación de comprobantes de compra · MODIF: modificación masiva de cabecera ·
+  CPBTE: crear comprobante de compra. Usan un único mes (AAAAMM) y cada locustfile toma solo
+  las filas de su módulo.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from holistor_stress.data.periodo import RangoPeriodo, parsear_periodo
 
 TIPOS_LOTE = ("COMPRAS", "VENTAS", "CERTIFICADOS_EMITIDOS", "CERTIFICADOS_RECIBIDOS")
+MODULOS_ASIENTO = ("GDC", "SYJ")
+MODULOS_COMPROBANTES = ("IMPO", "MODIF", "CPBTE")
+Modulo = Literal["GDC", "SYJ", "IMPO", "MODIF", "CPBTE"]
 TipoLote = Literal["COMPRAS", "VENTAS", "CERTIFICADOS_EMITIDOS", "CERTIFICADOS_RECIBIDOS"]
 
 
@@ -20,7 +30,7 @@ class FilaCarga(BaseModel):
     tenant_id: int = Field(alias="tenantId", gt=0)
     usuario: str = Field(min_length=1)
     clave: SecretStr | None = None
-    modulo: Literal["GDC", "SYJ"]
+    modulo: Modulo
     empresa: int = Field(ge=0)
     periodo: str
     tipo_lote: TipoLote | None = Field(None, alias="tipoLote")
@@ -30,6 +40,10 @@ class FilaCarga(BaseModel):
     origen_asiento_id: int | None = Field(None, alias="origenAsientoId")
     comprobantes_a_incluir: str = Field("Todos", alias="comprobantesAIncluir")
     periodo_fiscal_id: int | None = Field(None, alias="periodoFiscalId")
+    # gdc: Account/Authenticate del back de GDC (email + tenantId).
+    # plataforma: IsTenantAvailable + TokenAuth/Authenticate de la plataforma SaaS (requiere `tenancy`).
+    login: Literal["gdc", "plataforma"] = "gdc"
+    tenancy: str | None = None  # nombre del tenant en la plataforma (GDCpruebasQA7)
 
     @model_validator(mode="before")
     @classmethod
@@ -44,6 +58,11 @@ class FilaCarga(BaseModel):
     def _mayusculas(cls, v: Any) -> Any:
         return v.strip().upper() if isinstance(v, str) else v
 
+    @field_validator("login", mode="before")
+    @classmethod
+    def _minusculas(cls, v: Any) -> Any:
+        return v.strip().lower() if isinstance(v, str) else v
+
     @field_validator("periodo")
     @classmethod
     def _periodo(cls, v: str) -> str:
@@ -55,6 +74,14 @@ class FilaCarga(BaseModel):
             raise ValueError("GDC requiere 'tipoLote' (" + ", ".join(TIPOS_LOTE) + ") u 'origenAsientoId'")
         if self.modulo == "SYJ" and not self.plantilla:
             raise ValueError("SYJ requiere 'plantilla' (archivo JSON en la carpeta de plantillas SYJ)")
+        if self.modulo in MODULOS_COMPROBANTES:
+            r = self.rango
+            if r.todos or r.desde != r.hasta:
+                raise ValueError(
+                    f"{self.modulo} trabaja sobre un único mes: 'periodo' debe ser AAAAMM (vino {self.periodo})"
+                )
+        if self.login == "plataforma" and not self.tenancy:
+            raise ValueError("login=plataforma requiere 'tenancy' (nombre del tenant, por ejemplo GDCpruebasQA7)")
         return self
 
     @property
@@ -71,7 +98,8 @@ class FilaCarga(BaseModel):
     @property
     def etiqueta(self) -> str:
         """Prefijo de logs y fallas, igual que en la colección: [GDC1 · E3064 · 202601-202606 · COMPRAS]."""
-        partes = [self.usuario, f"E{self.empresa}", self.periodo, self.tipo_lote or self.modulo]
+        quien = f"{self.usuario}@{self.tenancy}" if self.tenancy else self.usuario
+        partes = [quien, f"E{self.empresa}", self.periodo, self.tipo_lote or self.modulo]
         return "[" + " · ".join(partes) + "]"
 
     def con_clave(self, clave: str) -> FilaCarga:

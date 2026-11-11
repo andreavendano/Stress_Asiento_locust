@@ -7,4 +7,5 @@ from holistor_stress.tasks.contexto_tasks import ReabrirPantallaTask
 
 
 class SmokeContextoUser(HolistorUser):
+    modulos_fila = ("GDC", "SYJ")
     tasks = [ReabrirPantallaTask]

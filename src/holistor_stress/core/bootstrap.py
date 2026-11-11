@@ -81,6 +81,20 @@ def _usuarios_pedidos(environment) -> int | None:
     return getattr(opts, "num_users", None)
 
 
+def _modulos_del_escenario(environment) -> set[str] | None:
+    """Módulos de users.csv que usan las clases de usuario del locustfile (atributo `modulos_fila`).
+
+    Si alguna clase no lo declara, se usan todas las filas (comportamiento original).
+    """
+    modulos: set[str] = set()
+    for cls in getattr(environment, "user_classes", None) or []:
+        propios = getattr(cls, "modulos_fila", None)
+        if not propios:
+            return None
+        modulos.update(propios)
+    return modulos or None
+
+
 _environment_actual = None  # el evento quit no recibe el environment
 
 
@@ -98,6 +112,7 @@ def _inicializar(environment, **_kwargs):
             filtro=opts.filtro_filas or None,
             usuarios_pedidos=_usuarios_pedidos(environment),
             permitir_produccion=bool(opts.permitir_produccion),
+            modulos=_modulos_del_escenario(environment),
         )
     except (ConfigError, DatosInvalidosError, GuardiaProduccionError) as e:
         logger.error("No se puede iniciar la prueba.\n%s", e)
@@ -194,6 +209,15 @@ def _escribir_salida(exit_code=None, **_kwargs):
 @events.quitting.add_listener
 def _resumen_final(environment, **_kwargs):
     rt = getattr(environment, "holistor", None)
+    ciclos = getattr(rt, "ciclos", None) if rt is not None else None
+    if ciclos is not None and ciclos.total:
+        logger.info(
+            "Ciclos: %d · OK %d · con falla %d · detalle en %s",
+            ciclos.total,
+            ciclos.total - ciclos.fallidos,
+            ciclos.fallidos,
+            ciclos.archivo,
+        )
     if rt is None or rt.trabajos is None or not rt.trabajos.total:
         return
     t = rt.trabajos

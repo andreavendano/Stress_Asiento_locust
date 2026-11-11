@@ -17,6 +17,41 @@ datos:
 modulos:
   gdc: { habilitado: true }
   syj: { habilitado: false }    # requiere EmpMod, nuc_EjerEco y nuc_TipoAsiento (doc del dev)
+  impo: { habilitado: true }    # importación de comprobantes de compra (locustfiles/importacion_compras.py)
+  modif: { habilitado: true }   # modificación masiva de cabecera (locustfiles/modificacion_masiva.py)
+  cpbte: { habilitado: true }   # crear comprobante de compra (locustfiles/comprobante_compra_*.py)
+
+# Hosts de la plataforma SaaS: login de las filas con login=plataforma, stream de la importación y
+# navegación del flujo completo de crear comprobante.
+plataforma:
+  host_url: "https://plataforma-saas-host-qa.azurewebsites.net"
+  portal_url: "https://plataforma-saas-qa.azurewebsites.net"
+  front_url: "https://gestor-comprobantes-front.azurewebsites.net"
+
+# Datos maestros de los escenarios de comprobantes (empresa, período, proveedor, tipos de movimiento).
+maestros:
+  cache: true                   # el primer usuario de cada tenant/empresa/período hace los lookups
+
+# Importación de comprobantes de compra (antes IMPO_* del .env).
+importacion:
+  origen_codigo: "PIC"          # Portal IVA (el id del origen se busca en la API)
+  tipo_comprobante: "11"        # código ARCA del tipo de comprobante del CSV (11 = Factura C)
+  moneda: "PES"
+  tipo_cambio: 1
+  importe_min: 50000            # importe total de cada comprobante: aleatorio entre min y max
+  importe_max: 60000
+  lote_n: 28                    # comprobantes por archivo
+  espera_empresa_libre_s: 600   # si la empresa tiene otra importación en curso
+  timeout_proceso_archivo_s: 3600
+  timeout_job_s: 3600
+  intervalo_sondeo_s: 5
+
+# Modificación masiva de cabecera (antes MODIF_* del .env).
+modificacion:
+  seleccion: lote               # lote: lote_n comprobantes de una página al azar · todos: todo el período (pesado)
+  lote_n: 50                    # máximo 100
+  cond_fiscal: [4, 1]           # 4=EX, 1=RI…: cada ciclo usa el primero distinto del valor actual
+  provincia: [18, 1]            # 18=FORMOSA, 1=BUENOS AIRES…
 
 flujo:
   contexto: una_vez             # una_vez | cada_iteracion

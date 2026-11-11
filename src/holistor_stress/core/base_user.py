@@ -38,6 +38,9 @@ N_GUARDIA = "[Setup] guardia de producción"
 
 class HolistorUser(HttpUser):
     abstract = True
+    # Módulos de users.csv que usa este usuario virtual (None = todas las filas). El bootstrap carga en el
+    # pool solo las filas de los módulos de las clases del locustfile.
+    modulos_fila: tuple[str, ...] | None = None
 
     def __init__(self, environment):
         super().__init__(environment)
@@ -65,12 +68,21 @@ class HolistorUser(HttpUser):
             metrics.registrar(self.environment, metrics.TIPO_SETUP, N_SIN_FILA, error=str(e))
             self.detener(f"sin fila: {e}")
             return
-        self.ctx = ContextoAsiento(fila=fila)
+        self.ctx = self.nuevo_contexto(fila)
         logger.info("%s usuario virtual iniciado (fila %s)", fila.etiqueta, fila.id)
         self.preparar()
 
     def on_stop(self) -> None:
         self.liberar()
+
+    # ───────────── puntos de extensión (los usan los escenarios de comprobantes) ─────────────
+
+    def nuevo_contexto(self, fila) -> ContextoAsiento:
+        return ContextoAsiento(fila=fila)
+
+    def preparar_contexto(self, con_precheck: bool) -> None:
+        """Abre la pantalla del escenario. Por defecto, Generar Asientos (empresa, ejercicio, período, origen)."""
+        preparar_contexto(self, con_precheck=con_precheck)
 
     # ───────────── API para las tareas ─────────────
 
@@ -84,7 +96,7 @@ class HolistorUser(HttpUser):
         precheck = con_precheck and self.ctx.registros_precheck is None
         with metrics.cronometro() as ms:
             try:
-                preparar_contexto(self, con_precheck=precheck)
+                self.preparar_contexto(precheck)
             except (FallaDatos, SesionInvalidadaError) as e:
                 metrics.registrar(self.environment, metrics.TIPO_FLUJO, N_CONTEXTO, ms(), error=e)
                 self.detener(str(e))
